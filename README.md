@@ -1,2 +1,18 @@
-# EV_Fuel_Comparison_App
-Vehicle Fuel Cost Comparison is a Streamlit web app that compares annual fuel costs for current and replacement vehicles using EPA data 1984 - July 2026. Users can adjust fuel and charging assumptions to estimate savings and explore vehicle details.
+# Vehicle Fuel Cost Comparison
+
+This Streamlit app compares vehicle fuel costs using EPA vehicle data.
+
+## Run locally
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Deploy to Streamlit Community Cloud
+
+1. Push this folder to a GitHub repository.
+2. Open https://share.streamlit.io/
+3. Connect your GitHub account.
+4. Select the repository and set the main file to `app.py`.
+5. Streamlit Community Cloud will build and publish your app.
