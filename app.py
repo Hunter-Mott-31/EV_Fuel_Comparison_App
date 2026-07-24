@@ -22,12 +22,30 @@ st.title("🚗 Vehicle Fuel Cost Comparison Tool")
 # LOAD DATA
 # --------------------------------------------------
 
-data_path = Path(__file__).resolve().parent / "Data" / "vehicles.csv"
+def load_vehicle_data():
+    candidates = [
+        Path(__file__).resolve().parent / "Data" / "vehicles.csv",
+        Path(__file__).resolve().parent / "data" / "vehicles.csv",
+        Path.cwd() / "Data" / "vehicles.csv",
+        Path.cwd() / "data" / "vehicles.csv",
+    ]
 
-df = pd.read_csv(
-    data_path,
-    low_memory=False
-)
+    for path in candidates:
+        if path.exists():
+            return pd.read_csv(path, low_memory=False)
+
+    checked_paths = "\n".join(str(path) for path in candidates)
+    raise FileNotFoundError(
+        "Could not find vehicles.csv. Checked:\n"
+        f"{checked_paths}"
+    )
+
+
+try:
+    df = load_vehicle_data()
+except FileNotFoundError as exc:
+    st.error(str(exc))
+    st.stop()
 
 # --------------------------------------------------
 # CREATE VEHICLE LABELS
@@ -118,14 +136,20 @@ year_range = st.sidebar.slider(
     (year_min, year_max)
 )
 
+default_make = "Toyota"
+current_vehicle_label = "2026 Toyota Tundra 2WD"
+replacement_vehicle_label = "2026 Toyota Prius"
+
 current_make = st.selectbox(
     "Current Vehicle Make",
-    make_list
+    make_list,
+    index=make_list.index(default_make) if default_make in make_list else 0
 )
 
 new_make = st.selectbox(
     "Replacement Vehicle Make",
-    make_list
+    make_list,
+    index=make_list.index(default_make) if default_make in make_list else 0
 )
 
 # --------------------------------------------------
@@ -142,22 +166,38 @@ new_make_df = filtered_df[
 
 col1, col2 = st.columns(2)
 
+current_vehicle_options = sorted(
+    current_make_df["vehicle_label"].unique()
+)
+new_vehicle_options = sorted(
+    new_make_df["vehicle_label"].unique()
+)
+
+current_vehicle_index = (
+    current_vehicle_options.index(current_vehicle_label)
+    if current_vehicle_label in current_vehicle_options
+    else 0
+)
+new_vehicle_index = (
+    new_vehicle_options.index(replacement_vehicle_label)
+    if replacement_vehicle_label in new_vehicle_options
+    else 0
+)
+
 with col1:
 
     current_vehicle_name = st.selectbox(
         "Current Vehicle",
-        sorted(
-            current_make_df["vehicle_label"].unique()
-        )
+        current_vehicle_options,
+        index=current_vehicle_index
     )
 
 with col2:
 
     new_vehicle_name = st.selectbox(
         "Replacement Vehicle",
-        sorted(
-            new_make_df["vehicle_label"].unique()
-        )
+        new_vehicle_options,
+        index=new_vehicle_index
     )
 
 # --------------------------------------------------
