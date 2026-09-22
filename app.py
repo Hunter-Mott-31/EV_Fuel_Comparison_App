@@ -4,11 +4,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from calculations import *
+from calculations import calculate_cost_per_mile, vehicle_type
 
 # --------------------------------------------------
 # PAGE SETTINGS
 # --------------------------------------------------
+# Set the main page title and layout for the dashboard.
 
 st.set_page_config(
     page_title="Vehicle Fuel Cost Comparison",
@@ -21,6 +22,8 @@ st.title("🚗 Vehicle Fuel Cost Comparison Tool")
 # --------------------------------------------------
 # LOAD DATA
 # --------------------------------------------------
+# Look for the vehicle dataset in a few common locations so the app can still
+# load it reliably when it is started from different folders.
 
 def load_vehicle_data():
     candidates = [
@@ -50,6 +53,8 @@ except FileNotFoundError as exc:
 # --------------------------------------------------
 # CREATE VEHICLE LABELS
 # --------------------------------------------------
+# Build a cleaner label for each vehicle so the user can easily identify the car
+# they want to compare.
 
 df["vehicle_label"] = (
     df["year"].astype(str)
@@ -62,6 +67,8 @@ df["vehicle_label"] = (
 # --------------------------------------------------
 # VEHICLE TYPE CLASSIFICATION
 # --------------------------------------------------
+# Classify each vehicle before calculating cost so the app can apply the right
+# formula for gasoline, hybrid, plug-in hybrid, or electric vehicles.
 
 df["vehicle_type"] = df.apply(
     vehicle_type,
@@ -71,6 +78,7 @@ df["vehicle_type"] = df.apply(
 # --------------------------------------------------
 # SIDEBAR INPUTS
 # --------------------------------------------------
+# These inputs let the user adjust the assumptions used in the cost comparison.
 
 st.sidebar.header("Fuel Cost Assumptions")
 
@@ -497,14 +505,17 @@ with tab4:
         "combE": "combE"
     }
 
-    available_columns = {}
-    for source_name, target_name in column_map.items():
-        if target_name in dataset_df.columns:
-            available_columns[source_name] = target_name
+    # This keeps the table readable and resilient. We prefer the named EPA columns
+    # when they exist, but we still fall back to the original field names so the app
+    # does not break if a dataset changes slightly.
+    available_columns = {
+        source_name: target_name
+        for source_name, target_name in column_map.items()
+        if target_name in dataset_df.columns
+    }
 
     for required_name in ["year", "make", "model", "fuelType1", "comb08", "combE"]:
-        if required_name not in available_columns:
-            available_columns[required_name] = required_name
+        available_columns.setdefault(required_name, required_name)
 
     dataset_display = dataset_df[
         [
