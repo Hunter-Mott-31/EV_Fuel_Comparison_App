@@ -1,232 +1,120 @@
 import pandas as pd
- 
- 
+
+
+# This helper checks a few likely column names in the dataset and grabs the first
+# one that actually exists. That keeps the code resilient when EPA field names are
+# not perfectly consistent across rows.
 def _get_value(vehicle, *candidate_keys):
-"""
-Return the first matching value from a vehicle record.
- 
-EPA datasets can use different column names across years and
-data extracts. This helper allows the rest of the code to
-look for multiple possible column names without duplicating logic.
- 
-Parameters
-----------
-vehicle : pandas.Series
-Vehicle record.
-*candidate_keys : str
-Possible column names for a given attribute.
- 
-Returns
--------
-Any
-Matching value if found, otherwise pd.NA.
-"""
-for key in candidate_keys:
-if key in vehicle.index:
-return vehicle[key]
- 
-return pd.NA
- 
- 
+    """Return the first matching EPA field from a vehicle row."""
+    for key in candidate_keys:
+        if key in vehicle.index:
+            return vehicle[key]
+
+    return pd.NA
+
+
+# A lot of vehicle data has blanks or odd values in it, so this makes sure we can
+# convert numbers safely without the code crashing on missing entries.
+def _safe_float(value, default=0.0):
+    """Convert a value to a float and return a safe default if it is missing."""
+    if pd.isna(value):
+        return default
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+# This function decides what kind of vehicle we are looking at before we do any
+# cost math. It is the logic gate that tells the app whether to use gasoline,
+# electric, or hybrid formulas.
 def vehicle_type(vehicle):
-"""
-Classify a vehicle's powertrain type.
- 
-Classification hierarchy:
-1. BEV (Battery Electric Vehicle)
-2. PHEV (Plug-In Hybrid Electric Vehicle)
-3. Hybrid
-4. ICE (Internal Combustion Engine)
- 
-Parameters
-----------
-vehicle : pandas.Series
-Vehicle record.
- 
-Returns
--------
-str
-Vehicle type category.
-"""
- 
-fuel_type = _get_value(vehicle, "fuelType1", "fuelType")
-utility_factor = _get_value(vehicle, "combinedUF", "combinedCD")
-drive_type = _get_value(vehicle, "atvType", "atvtype")
- 
-# Pure electric vehicles.
-if str(fuel_type).strip().lower() == "electricity":
-return "BEV"
- 
-# Utility factor is typically only populated for PHEVs.
-if pd.notna(utility_factor):
-return "PHEV"
- 
-# Standard hybrid vehicles.
-if "Hybrid" in str(drive_type):
-return "Hybrid"
- 
-# Everything else is treated as a traditional combustion vehicle.
-return "ICE"
- 
- 
+    """Identify whether the vehicle is BEV, PHEV, hybrid, or gasoline."""
+    fuel_type = _get_value(vehicle, "fuelType1", "fuelType")
+    utility_factor = _get_value(vehicle, "combinedUF", "combinedCD")
+    drive_type = _get_value(vehicle, "atvType", "atvtype")
+
+    if str(fuel_type).strip().lower() == "electricity":
+        return "BEV"
+
+    if pd.notna(utility_factor):
+        return "PHEV"
+
+    if "Hybrid" in str(drive_type):
+        return "Hybrid"
+
+    return "ICE"
+
+
+# Gas vehicles are priced using MPG, so this function turns fuel economy into a
+# cost-per-mile estimate based on the gas price the user selected.
 def gas_cost_per_mile(mpg, gas_price):
-"""
-Calculate estimated fuel cost per mile for a gasoline vehicle.
- 
-Formula:
-Cost Per Mile = Gas Price / MPG
- 
-Parameters
-----------
-mpg : float
-Combined fuel economy.
-gas_price : float
-Price per gallon.
- 
-Returns
--------
-float
-Cost per mile.
-"""
-return gas_price / mpg
- 
- 
+    """Estimate the fuel cost per mile for a gasoline vehicle."""
+    mpg = _safe_float(mpg)
+    gas_price = _safe_float(gas_price)
+
+    if mpg <= 0:
+        return 0.0
+
+    return gas_price / mpg
+
+
+# Electric vehicle cost is based on how many kWh the vehicle uses for 100 miles,
+# then we multiply that by the electricity rate to get a per-mile cost.
 def ev_cost_per_mile(kwh100, electric_rate):
-"""
-Calculate operating cost per mile for an electric vehicle.
- 
-EPA efficiency is reported as kWh per 100 miles, so it must
-be converted to kWh per mile before applying the electricity rate.
- 
-Formula:
-Cost Per Mile = (kWh per 100 miles / 100) * Electricity Rate
- 
-Parameters
-----------
-kwh100 : float
-Electricity consumption per 100 miles.
-electric_rate : float
-Cost per kWh.
- 
-Returns
--------
-float
-Cost per mile.
-"""
-return (kwh100 / 100) * electric_rate
- 
- 
+    """Estimate the cost per mile for an electric vehicle."""
+    kwh100 = _safe_float(kwh100)
+    electric_rate = _safe_float(electric_rate)
+
+    if kwh100 <= 0:
+        return 0.0
+
+    return (kwh100 / 100) * electric_rate
+
+
+# Plug-in hybrids are a little more nuanced because they use both electricity and
+# gasoline. This function blends those two costs based on the vehicle's utility
+# factor, which represents how much of the driving is powered by electricity.
 def phev_cost_per_mile(
-utility_factor,
-kwh100,
-electric_rate,
-mpg,
-gas_price
+    utility_factor,
+    kwh100,
+    electric_rate,
+    mpg,
+    gas_price
 ):
-"""
-Calculate blended operating cost per mile for a plug-in hybrid.
- 
-Utility Factor represents the percentage of miles expected
-to be driven using electricity. The remaining miles are
-assumed to be driven using gasoline.
- 
-Parameters
-----------
-utility_factor : float
-Share of miles driven electrically.
-kwh100 : float
-Electricity consumption per 100 miles.
-electric_rate : float
-Cost per kWh.
-mpg : float
-Fuel economy when running on gasoline.
-gas_price : float
-Price per gallon.
- 
-Returns
--------
-float
-Blended cost per mile.
-"""
- 
-electric_cost = (
-kwh100 / 100
-) * electric_rate
- 
-gas_cost = (
-gas_price / mpg
-)
- 
-return (
-utility_factor * electric_cost
-+
-(1 - utility_factor) * gas_cost
-)
- 
- 
-def calculate_cost_per_mile(
-vehicle,
-gas_price,
-electric_rate
-):
-"""
-Calculate vehicle operating cost per mile.
- 
-This function serves as the main entry point for vehicle
-fuel-cost analysis. It determines the vehicle type and
-applies the appropriate cost calculation method.
- 
-Parameters
-----------
-vehicle : pandas.Series
-Vehicle record from the EPA dataset.
-gas_price : float
-Gasoline price per gallon.
-electric_rate : float
-Electricity price per kWh.
- 
-Returns
--------
-float
-Estimated operating cost per mile.
-"""
- 
-# Determine vehicle powertrain category.
-vtype = vehicle_type(vehicle)
- 
-# EPA combined electricity consumption (kWh/100 miles).
-comb_e = _get_value(vehicle, "combE")
- 
-# Utility factor used for PHEV blended calculations.
-utility_factor = _get_value(
-vehicle,
-"combinedUF",
-"combinedCD"
-)
- 
-# EPA combined fuel economy in MPG.
-comb_mpg = _get_value(vehicle, "comb08")
- 
-if vtype == "BEV":
- 
-return ev_cost_per_mile(
-comb_e,
-electric_rate
-)
- 
-elif vtype == "PHEV":
- 
-return phev_cost_per_mile(
-utility_factor,
-comb_e,
-electric_rate,
-comb_mpg,
-gas_price
-)
- 
-else:
- 
-return gas_cost_per_mile(
-comb_mpg,
-gas_price
-)
+    """Blend electric and gasoline cost for a plug-in hybrid."""
+    utility_factor = _safe_float(utility_factor)
+    kwh100 = _safe_float(kwh100)
+    electric_rate = _safe_float(electric_rate)
+    mpg = _safe_float(mpg)
+    gas_price = _safe_float(gas_price)
+
+    electric_cost = (kwh100 / 100) * electric_rate
+    gas_cost = gas_price / mpg if mpg > 0 else 0.0
+
+    return (utility_factor * electric_cost) + ((1 - utility_factor) * gas_cost)
+
+
+# This is the main decision point. It reads the vehicle type and then sends the
+# data through the right formula so the app can compare costs across vehicle types.
+def calculate_cost_per_mile(vehicle, gas_price, electric_rate):
+    """Return the estimated cost per mile for the selected vehicle type."""
+    vtype = vehicle_type(vehicle)
+    comb_e = _safe_float(_get_value(vehicle, "combE"))
+    utility_factor = _safe_float(_get_value(vehicle, "combinedUF", "combinedCD"))
+    comb_mpg = _safe_float(_get_value(vehicle, "comb08"))
+
+    if vtype == "BEV":
+        return ev_cost_per_mile(comb_e, electric_rate)
+
+    if vtype == "PHEV":
+        return phev_cost_per_mile(
+            utility_factor,
+            comb_e,
+            electric_rate,
+            comb_mpg,
+            gas_price,
+        )
+
+    return gas_cost_per_mile(comb_mpg, gas_price)
